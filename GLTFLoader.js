@@ -65,7 +65,7 @@ import {
 	SRGBColorSpace,
 	InstancedBufferAttribute
 } from './three.module.js';
-import * as BufferGeometryUtils from './utils/BufferGeometryUtils.js';
+import * as BufferGeometryUtils from './BufferGeometryUtils.js';
 class GLTFLoader extends Loader {
 
 	constructor( manager ) {
