@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GLB Architectural Viewer (three.js)</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0b0f1a; color: #e8eefc; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #app { position: fixed; inset: 0; }
+    #ui {
+      position: fixed; left: 14px; top: 14px; z-index: 10;
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+      background: rgba(18, 26, 44, 0.85);
+      border: 1px solid rgba(38, 52, 90, 0.9);
+      padding: 10px 12px; border-radius: 14px;
+      backdrop-filter: blur(6px);
+    }
+    #ui label { font-size: 14px; opacity: 0.95; }
+    #ui input[type="file"] { color: #e8eefc; }
+    #ui button {
+      background: #2a3b6e; color: #fff; border: 1px solid #3e5bb5;
+      padding: 8px 10px; border-radius: 10px; cursor: pointer;
+    }
+    #ui button:hover { filter: brightness(1.08); }
+    #panel {
+      position: fixed; left: 14px; top: 78px; z-index: 10;
+      background: rgba(18, 26, 44, 0.85);
+      border: 1px solid rgba(38, 52, 90, 0.9);
+      padding: 10px 12px; border-radius: 14px;
+      backdrop-filter: blur(6px);
+      font-size: 13px; line-height: 1.55; max-width: min(680px, calc(100vw - 28px));
+      white-space: pre-wrap;
+    }
+    #hint {
+      position: fixed; left: 14px; bottom: 14px; z-index: 10;
+      background: rgba(18, 26, 44, 0.85);
+      border: 1px solid rgba(38, 52, 90, 0.9);
+      padding: 10px 12px; border-radius: 14px;
+      backdrop-filter: blur(6px);
+      font-size: 13px; line-height: 1.55; opacity: 0.95;
+      max-width: min(680px, calc(100vw - 28px));
+    }
+    code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 8px; }
+    .ok { color: #8ff0a4; }
+    .warn { color: #ffd27d; }
+    .err { color: #ff8a8a; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="ui">
+    <label>
+      GLB 선택:
+      <input id="file" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" />
+    </label>
+    <button id="fit">Fit View</button>
+    <button id="reset">Reset</button>
+    <label style="display:flex;gap:6px;align-items:center;">
+      <input id="grid" type="checkbox" checked />
+      Grid
+    </label>
+    <label style="display:flex;gap:6px;align-items:center;">
+      <input id="axes" type="checkbox" checked />
+      Axes
+    </label>
+  </div>
+
+  <div id="panel" class="warn">준비됨. GLB 파일을 선택하세요.</div>
+
+  <div id="hint">
+    조작: 좌클릭 드래그=회전 / 휠=줌 / 우클릭(또는 Shift+드래그)=패닝<br/>
+    안정 실행: <code>python -m http.server 8000</code> → <code>http://localhost:8000/viewer.html</code>
+  </div>
+
+  <script type="module">
+    const panel = document.getElementById("panel");
+    const setPanel = (msg, cls="warn") => { panel.className = cls; panel.textContent = msg; };
+
+    // 1) 모듈 import 자체가 실패하는 경우를 잡기 위한 힌트:
+    setPanel("three.js 모듈 로딩 중...", "warn");
+
+    import * as THREE from "./vendor/three.module.js";
+    import { OrbitControls } from "./vendor/OrbitControls.js";
+    import { GLTFLoader } from "./vendor/GLTFLoader.js";
+
+    setPanel("준비됨. GLB 파일을 선택하세요.", "ok");
+
+    const container = document.getElementById("app");
+
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    // Scene
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f1a);
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 5000);
+    camera.position.set(6, 5, 8);
+
+    // Controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.05);
+    sun.position.set(10, 14, 8);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 0.1;
+    sun.shadow.camera.far = 200;
+    scene.add(sun);
+
+    const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+    fill.position.set(-10, 8, -6);
+    scene.add(fill);
+
+    // Helpers
+    const gridHelper = new THREE.GridHelper(50, 50, 0x3e5bb5, 0x26345a);
+    scene.add(gridHelper);
+
+    const axesHelper = new THREE.AxesHelper(3);
+    scene.add(axesHelper);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(200, 200),
+      new THREE.ShadowMaterial({ opacity: 0.25 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Model
+    let currentObject = null;
+    const loader = new GLTFLoader();
+
+    function setCastReceive(obj) {
+      obj.traverse((n) => {
+        if (n.isMesh) {
+          n.castShadow = true;
+          n.receiveShadow = true;
+          // backface 문제면 주석 해제:
+          // if (n.material) n.material.side = THREE.DoubleSide;
+        }
+      });
+    }
+
+    function clearModel() {
+      if (!currentObject) return;
+      scene.remove(currentObject);
+      currentObject.traverse((n) => {
+        if (n.isMesh) {
+          n.geometry?.dispose();
+          if (Array.isArray(n.material)) n.material.forEach(m => m.dispose());
+          else n.material?.dispose();
+        }
+      });
+      currentObject = null;
+    }
+
+    function frameToObject(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+
+      obj.position.sub(center);
+
+      const maxDim = Math.max(size.x, size.y, size.z);
+      if (!isFinite(maxDim) || maxDim <= 0) {
+        setPanel("모델 바운딩박스 계산 실패(빈 씬이거나 스케일 문제).", "err");
+        return;
+      }
+
+      const fov = THREE.MathUtils.degToRad(camera.fov);
+      let dist = (maxDim / 2) / Math.tan(fov / 2);
+      dist *= 1.35;
+
+      camera.near = Math.max(0.01, dist / 200);
+      camera.far = dist * 200;
+      camera.updateProjectionMatrix();
+
+      camera.position.set(dist, dist * 0.7, dist);
+      controls.target.set(0, 0, 0);
+      controls.update();
+    }
+
+    async function loadFromFile(file) {
+      setPanel(`로딩 중: ${file.name} (${Math.round(file.size/1024/1024)} MB)`, "warn");
+      console.log("[viewer] loading:", file);
+
+      clearModel();
+
+      const url = URL.createObjectURL(file);
+      try {
+        // 로더 에러를 확실히 잡기 위해 try/catch
+        const gltf = await loader.loadAsync(url);
+
+        const obj = gltf.scene;
+        if (!obj) {
+          setPanel("GLTF 로드는 되었지만 scene이 비어있습니다.", "err");
+          return;
+        }
+
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+
+        setCastReceive(obj);
+        scene.add(obj);
+        currentObject = obj;
+
+        frameToObject(obj);
+        setPanel(`로드 완료: ${file.name} (Fit 적용됨)`, "ok");
+        console.log("[viewer] loaded:", gltf);
+      } catch (err) {
+        console.error("[viewer] load error:", err);
+        setPanel(
+          "GLB 로드 실패.\n" +
+          "가능 원인: 손상된 GLB, DRACO/meshopt 압축 사용, 텍스처 외부 참조, 브라우저 보안(CORS).\n\n" +
+          "콘솔 에러 메시지를 확인하세요.\n" +
+          String(err),
+          "err"
+        );
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    // UI
+    const fileInput = document.getElementById("file");
+    const fitBtn = document.getElementById("fit");
+    const resetBtn = document.getElementById("reset");
+    const gridChk = document.getElementById("grid");
+    const axesChk = document.getElementById("axes");
+
+    fileInput.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      await loadFromFile(file);
+    });
+
+    fitBtn.addEventListener("click", () => {
+      if (currentObject) frameToObject(currentObject);
+      else setPanel("현재 로드된 모델이 없습니다.", "warn");
+    });
+
+    resetBtn.addEventListener("click", () => {
+      clearModel();
+      camera.position.set(6, 5, 8);
+      controls.target.set(0, 0, 0);
+      controls.update();
+      setPanel("초기화 완료. GLB를 다시 선택하세요.", "ok");
+    });
+
+    gridChk.addEventListener("change", () => gridHelper.visible = gridChk.checked);
+    axesChk.addEventListener("change", () => axesHelper.visible = axesChk.checked);
+
+    // Resize
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Render loop
+    function animate() {
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    animate();
+  </script>
+</body>
+</html>
